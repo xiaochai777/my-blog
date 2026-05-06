@@ -123,6 +123,11 @@
       document.getElementById('editor').classList.add('active');
     }
 
+    // Unicode 安全的 base64 解码
+    function decodeBase64(str) {
+      return decodeURIComponent(atob(str).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+    }
+
     // 编辑文章
     async function editPost(filename) {
       try {
@@ -132,7 +137,7 @@
         const file = await res.json();
         
         currentFile = { name: filename, sha: file.sha };
-        const content = atob(file.content);
+        const content = decodeBase64(file.content);
         
         // 解析 frontmatter
         const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
