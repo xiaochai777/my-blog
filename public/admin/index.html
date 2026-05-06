@@ -6,7 +6,7 @@
   <title>博客管理后台</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f5f5; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f5f5; min-height: 100vh; }
     .container { max-width: 900px; margin: 0 auto; padding: 20px; }
     h1 { color: #333; margin-bottom: 20px; }
     .card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
@@ -17,8 +17,6 @@
     .post-item { padding: 16px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
     .post-item:last-child { border-bottom: none; }
     .post-title { font-size: 18px; color: #333; }
-    .post-date { color: #999; font-size: 14px; }
-    .post-actions button { margin-left: 10px; padding: 6px 12px; font-size: 14px; }
     .editor { display: none; }
     .editor.active { display: block; }
     .form-group { margin-bottom: 16px; }
@@ -30,15 +28,35 @@
     .msg.success { background: #d4edda; color: #155724; display: block; }
     .msg.error { background: #f8d7da; color: #721c24; display: block; }
     .loading { text-align: center; padding: 40px; color: #999; }
+    /* 登录界面 */
+    .login-box { max-width: 400px; margin: 100px auto; text-align: center; }
+    .login-box h2 { margin-bottom: 20px; color: #333; }
+    .login-box input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 16px; margin-bottom: 16px; }
+    .login-box .btn { width: 100%; padding: 14px; font-size: 18px; }
+    .login-box p { color: #666; font-size: 14px; margin-top: 16px; }
+    .login-box a { color: #e74c3c; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>📝 博客管理后台</h1>
+  <!-- 登录界面 -->
+  <div id="loginPage" class="login-box">
+    <div class="card" style="padding:40px;">
+      <h2>📝 博客登录</h2>
+      <input type="password" id="tokenInput" placeholder="粘贴你的 GitHub Token">
+      <button class="btn" onclick="doLogin()">登录</button>
+      <p>Token 在 <a href="https://github.com/settings/tokens" target="_blank">GitHub 设置</a> 生成<br>需要 repo 权限</p>
+    </div>
+  </div>
+
+  <!-- 主界面 -->
+  <div id="mainPage" class="container" style="display:none;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <h1>📝 博客管理后台</h1>
+      <button class="btn btn-secondary" onclick="doLogout()">退出</button>
+    </div>
     
     <div id="msg" class="msg"></div>
     
-    <!-- 文章列表 -->
     <div id="postList" class="card">
       <div class="toolbar">
         <h2>文章列表</h2>
@@ -47,7 +65,6 @@
       <div id="posts" class="loading">加载中...</div>
     </div>
     
-    <!-- 编辑器 -->
     <div id="editor" class="card editor">
       <div class="toolbar">
         <h2 id="editorTitle">新建文章</h2>
@@ -86,275 +103,217 @@
     </div>
   </div>
 
-  <script>
-    const TOKEN = localStorage.getItem('github_token') || prompt('请输入你的 GitHub Personal Access Token:');
-    const REPO = 'xiaochai777/my-blog';
-    const BRANCH = 'main';
-    const API = `https://api.github.com/repos/${REPO}`;
+<script>
+const REPO = 'xiaochai777/my-blog';
+const BRANCH = 'main';
+let TOKEN = '';
+let currentFile = null;
+
+// 登录
+function doLogin() {
+  const token = document.getElementById('tokenInput').value.trim();
+  if (!token) { alert('请输入 Token'); return; }
+  TOKEN = token;
+  localStorage.setItem('gh_token', token);
+  showMain();
+}
+
+// 退出
+function doLogout() {
+  localStorage.removeItem('gh_token');
+  TOKEN = '';
+  document.getElementById('loginPage').style.display = 'block';
+  document.getElementById('mainPage').style.display = 'none';
+}
+
+// 显示主界面
+function showMain() {
+  document.getElementById('loginPage').style.display = 'none';
+  document.getElementById('mainPage').style.display = 'block';
+  loadPosts();
+}
+
+// 初始化
+const savedToken = localStorage.getItem('gh_token');
+if (savedToken) {
+  TOKEN = savedToken;
+  showMain();
+}
+
+// API 请求封装
+async function api(url, method = 'GET', body = null) {
+  const opts = {
+    method,
+    headers: { 'Authorization': `token ${TOKEN}`, 'Content-Type': 'application/json' }
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(`https://api.github.com/repos/${REPO}${url}`, opts);
+  return res;
+}
+
+// 加载文章
+async function loadPosts() {
+  document.getElementById('posts').innerHTML = '加载中...';
+  try {
+    const res = await api(`/contents/src/content/blog?ref=${BRANCH}`);
+    const files = await res.json();
+    const posts = Array.isArray(files) ? files.filter(f => f.name.endsWith('.md')) : [];
     
-    let currentFile = null;
-    let posts = [];
-
-    // 加载文章列表
-    async function loadPosts() {
-      try {
-        const res = await fetch(`${API}/contents/src/content/blog?ref=${BRANCH}`, {
-          headers: { 'Authorization': `token ${TOKEN}` }
-        });
-        const files = await res.json();
-        
-        posts = files.filter(f => f.name.endsWith('.md') || f.name.endsWith('.mdx'));
-        
-        const html = posts.length ? posts.map(p => `
-          <div class="post-item">
-            <div>
-              <div class="post-title">${p.name.replace(/\.(md|mdx)$/, '')}</div>
-            </div>
-            <div class="post-actions">
-              <button class="btn btn-secondary" onclick="editPost('${p.name}')">编辑</button>
-              <button class="btn btn-secondary" onclick="deletePost('${p.name}', '${p.sha}')">删除</button>
-            </div>
-          </div>
-        `).join('') : '<p style="padding:20px;color:#999;">还没有文章，点击上面按钮新建一篇吧！</p>';
-        
-        document.getElementById('posts').innerHTML = html;
-      } catch (e) {
-        document.getElementById('posts').innerHTML = '<p style="padding:20px;color:red;">加载失败：' + e.message + '</p>';
-      }
+    if (posts.length === 0) {
+      document.getElementById('posts').innerHTML = '<p style="padding:20px;color:#999;">还没有文章</p>';
+      return;
     }
+    
+    document.getElementById('posts').innerHTML = posts.map(p => `
+      <div class="post-item">
+        <div class="post-title">${p.name.replace('.md','')}</div>
+        <div>
+          <button class="btn btn-secondary" onclick="editPost('${p.name}')">编辑</button>
+          <button class="btn btn-secondary" onclick="deletePost('${p.name}','${p.sha}')">删除</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    document.getElementById('posts').innerHTML = '<p style="color:red;">加载失败: ' + e.message + '</p>';
+  }
+}
 
-    // 新建文章
-    function newPost() {
-      currentFile = null;
-      document.getElementById('editorTitle').textContent = '新建文章';
-      document.getElementById('title').value = '';
-      document.getElementById('description').value = '';
-      document.getElementById('heroImage').value = '';
-      document.getElementById('imagePreview').innerHTML = '';
-      document.getElementById('tags').value = '';
-      document.getElementById('content').value = '';
-      document.getElementById('editor').classList.add('active');
+// 新建文章
+function newPost() {
+  currentFile = null;
+  document.getElementById('editorTitle').textContent = '新建文章';
+  document.getElementById('title').value = '';
+  document.getElementById('description').value = '';
+  document.getElementById('heroImage').value = '';
+  document.getElementById('imagePreview').innerHTML = '';
+  document.getElementById('tags').value = '';
+  document.getElementById('content').value = '';
+  document.getElementById('editor').classList.add('active');
+}
+
+// 编辑文章
+async function editPost(filename) {
+  try {
+    const res = await api(`/contents/src/content/blog/${filename}?ref=${BRANCH}`);
+    const file = await res.json();
+    currentFile = { name: filename, sha: file.sha };
+    
+    const content = decodeURIComponent(atob(file.content).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+    
+    const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+    if (match) {
+      const fm = match[1], body = match[2];
+      document.getElementById('title').value = (fm.match(/title:\s*["']?(.*?)["']?\s*$/m) || [])[1] || '';
+      document.getElementById('description').value = (fm.match(/description:\s*["']?(.*?)["']?\s*$/m) || [])[1] || '';
+      document.getElementById('heroImage').value = (fm.match(/heroImage:\s*["']?(.*?)["']?\s*$/m) || [])[1] || '';
+      document.getElementById('tags').value = (fm.match(/tags:\s*\[(.*?)\]/) || [])[1] || '';
+      document.getElementById('content').value = body.trim();
+    } else {
+      document.getElementById('content').value = content;
     }
+    document.getElementById('editorTitle').textContent = '编辑文章';
+    document.getElementById('editor').classList.add('active');
+  } catch (e) {
+    showMsg('加载失败: ' + e.message, 'error');
+  }
+}
 
-    // 上传图片到 GitHub
-    async function uploadImage(input) {
-      const file = input.files[0];
-      if (!file) return;
-      
-      // 显示预览
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        document.getElementById('imagePreview').innerHTML = `<img src="${e.target.result}" style="max-width:200px;border-radius:8px;">`;
-      };
-      reader.readAsDataURL(file);
-      
-      // 上传到 GitHub
-      const date = new Date().toISOString().split('T')[0];
-      const filename = `src/assets/images/${date}-${file.name}`;
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const encoded = btoa(binary);
-      
-      try {
-        showMsg('上传中...', 'success');
-        const res = await fetch(`${API}/contents/${filename}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `token ${TOKEN}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            message: `上传图片: ${file.name}`,
-            content: encoded,
-            branch: BRANCH
-          })
-        });
-        
-        if (res.ok) {
-          const data = await res.json();
-          document.getElementById('heroImage').value = `../../assets/images/${date}-${file.name}`;
-          showMsg('✅ 图片上传成功！', 'success');
-        } else {
-          showMsg('❌ 上传失败', 'error');
-        }
-      } catch (e) {
-        showMsg('❌ 上传失败: ' + e.message, 'error');
-      }
+// 保存文章
+async function savePost() {
+  const title = document.getElementById('title').value.trim();
+  if (!title) { showMsg('请输入标题', 'error'); return; }
+  
+  const desc = document.getElementById('description').value.trim();
+  const heroImage = document.getElementById('heroImage').value.trim();
+  const tags = document.getElementById('tags').value.trim();
+  const content = document.getElementById('content').value;
+  const date = new Date().toISOString().split('T')[0];
+  const slug = title.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-');
+  const filename = currentFile ? currentFile.name : `${date}-${slug || 'post'}.md`;
+  
+  let fm = `---\ntitle: "${title}"\ndescription: "${desc}"\npubDate: "${date}"`;
+  if (heroImage) fm += `\nheroImage: "${heroImage}"`;
+  if (tags) fm += `\ntags: [${tags.split(',').map(t => `"${t.trim()}"`).join(', ')}]`;
+  fm += '\n---';
+  
+  const fullContent = fm + '\n\n' + content;
+  const encoded = btoa(unescape(encodeURIComponent(fullContent)));
+  
+  try {
+    const body = { message: currentFile ? `更新: ${title}` : `新建: ${title}`, content: encoded, branch: BRANCH };
+    if (currentFile) body.sha = currentFile.sha;
+    
+    const res = await api(`/contents/src/content/blog/${filename}`, 'PUT', body);
+    if (res.ok) {
+      showMsg('✅ 保存成功！正在部署...', 'success');
+      cancelEdit();
+      loadPosts();
+      // 触发部署
+      fetch('https://my-blog-deploy.xianzhi.workers.dev', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer my-blog-secret-123' }
+      }).then(() => showMsg('✅ 发布成功！约30秒后生效。', 'success')).catch(() => {});
+    } else {
+      const err = await res.json();
+      showMsg('保存失败: ' + err.message, 'error');
     }
+  } catch (e) {
+    showMsg('保存失败: ' + e.message, 'error');
+  }
+}
 
-    // Unicode 安全的 base64 解码
-    function decodeBase64(str) {
-      return decodeURIComponent(atob(str).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+// 删除文章
+async function deletePost(filename, sha) {
+  if (!confirm(`确定删除 "${filename}" 吗？`)) return;
+  try {
+    const res = await api(`/contents/src/content/blog/${filename}`, 'DELETE', { message: `删除: ${filename}`, sha, branch: BRANCH });
+    if (res.ok) {
+      showMsg('✅ 已删除，部署中...', 'success');
+      loadPosts();
+      fetch('https://my-blog-deploy.xianzhi.workers.dev', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer my-blog-secret-123' }
+      }).then(() => showMsg('✅ 已删除！约30秒后生效。', 'success')).catch(() => {});
+    } else {
+      const err = await res.json();
+      showMsg('删除失败: ' + err.message, 'error');
     }
+  } catch (e) {
+    showMsg('删除失败: ' + e.message, 'error');
+  }
+}
 
-    // 编辑文章
-    async function editPost(filename) {
-      try {
-        const res = await fetch(`${API}/contents/src/content/blog/${filename}?ref=${BRANCH}`, {
-          headers: { 'Authorization': `token ${TOKEN}` }
-        });
-        const file = await res.json();
-        
-        currentFile = { name: filename, sha: file.sha };
-        const content = decodeBase64(file.content);
-        
-        // 解析 frontmatter
-        const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-        if (match) {
-          const fm = match[1];
-          const body = match[2];
-          
-          const titleMatch = fm.match(/title:\s*["']?(.*?)["']?\s*$/m);
-          const descMatch = fm.match(/description:\s*["']?(.*?)["']?\s*$/m);
-          const tagsMatch = fm.match(/tags:\s*\[(.*?)\]/);
-          const heroMatch = fm.match(/heroImage:\s*["']?(.*?)["']?\s*$/m);
-          
-          document.getElementById('title').value = titleMatch ? titleMatch[1] : '';
-          document.getElementById('description').value = descMatch ? descMatch[1] : '';
-          document.getElementById('heroImage').value = heroMatch ? heroMatch[1] : '';
-          document.getElementById('tags').value = tagsMatch ? tagsMatch[1].replace(/["']/g, '') : '';
-          document.getElementById('content').value = body.trim();
-          
-          // 显示图片预览
-          if (heroMatch && heroMatch[1]) {
-            document.getElementById('imagePreview').innerHTML = `<p style="color:#666;font-size:14px;">当前封面图: ${heroMatch[1]}</p>`;
-          }
-        } else {
-          document.getElementById('content').value = content;
-        }
-        
-        document.getElementById('editorTitle').textContent = '编辑文章';
-        document.getElementById('editor').classList.add('active');
-      } catch (e) {
-        showMsg('加载文章失败：' + e.message, 'error');
-      }
+// 上传图片
+async function uploadImage(input) {
+  const file = input.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = (e) => document.getElementById('imagePreview').innerHTML = `<img src="${e.target.result}" style="max-width:200px;border-radius:8px;">`;
+  reader.readAsDataURL(file);
+  
+  const date = new Date().toISOString().split('T')[0];
+  const filename = `src/assets/images/${date}-${file.name}`;
+  const buffer = await file.arrayBuffer();
+  const binary = String.fromCharCode(...new Uint8Array(buffer));
+  const encoded = btoa(binary);
+  
+  try {
+    showMsg('上传中...', 'success');
+    const res = await api(`/contents/${filename}`, 'PUT', { message: `上传: ${file.name}`, content: encoded, branch: BRANCH });
+    if (res.ok) {
+      document.getElementById('heroImage').value = `../../assets/images/${date}-${file.name}`;
+      showMsg('✅ 图片上传成功！', 'success');
+    } else {
+      showMsg('❌ 上传失败', 'error');
     }
+  } catch (e) {
+    showMsg('❌ 上传失败: ' + e.message, 'error');
+  }
+}
 
-    // 保存文章
-    async function savePost() {
-      const title = document.getElementById('title').value.trim();
-      const desc = document.getElementById('description').value.trim();
-      const heroImage = document.getElementById('heroImage').value.trim();
-      const tags = document.getElementById('tags').value.trim();
-      const content = document.getElementById('content').value;
-      
-      if (!title) { showMsg('请输入标题', 'error'); return; }
-      
-      const date = new Date().toISOString().split('T')[0];
-      const slug = title.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-').replace(/^-|-$/g, '');
-      const filename = currentFile ? currentFile.name : `${date}-${slug || 'post'}.md`;
-      
-      const tagsArr = tags ? tags.split(',').map(t => `"${t.trim()}"`).join(', ') : '';
-      
-      let frontmatter = `---
-title: "${title}"
-description: "${desc}"
-pubDate: "${date}"`;
-      if (heroImage) frontmatter += `\nheroImage: "${heroImage}"`;
-      if (tagsArr) frontmatter += `\ntags: [${tagsArr}]`;
-      frontmatter += '\n---';
-
-      const fullContent = frontmatter + '\n\n' + content;
-      const encoded = btoa(unescape(encodeURIComponent(fullContent)));
-      
-      try {
-        const body = {
-          message: currentFile ? `更新文章: ${title}` : `新建文章: ${title}`,
-          content: encoded,
-          branch: BRANCH
-        };
-        if (currentFile) body.sha = currentFile.sha;
-        
-        const res = await fetch(`${API}/contents/src/content/blog/${filename}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `token ${TOKEN}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(body)
-        });
-        
-        if (res.ok) {
-          showMsg('保存成功！正在触发部署...', 'success');
-          cancelEdit();
-          loadPosts();
-          // 触发 Cloudflare Pages 重新部署
-          try {
-            await fetch('https://my-blog-deploy.xianzhi.workers.dev', {
-              method: 'POST',
-              headers: { 'Authorization': 'Bearer my-blog-secret-123' }
-            });
-            showMsg('✅ 发布成功！约30秒后生效，请稍后刷新博客页面。', 'success');
-          } catch(e) {
-            showMsg('✅ 文章已保存，但自动部署失败。请在 Cloudflare 手动部署。', 'error');
-          }
-        } else {
-          const err = await res.json();
-          showMsg('保存失败：' + err.message, 'error');
-        }
-      } catch (e) {
-        showMsg('保存失败：' + e.message, 'error');
-      }
-    }
-
-    // 删除文章
-    async function deletePost(filename, sha) {
-      if (!confirm(`确定要删除 "${filename}" 吗？`)) return;
-      
-      try {
-        showMsg('删除中...', 'success');
-        const res = await fetch(`${API}/contents/src/content/blog/${filename}`, {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `token ${TOKEN}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            message: `删除文章: ${filename}`,
-            sha: sha,
-            branch: BRANCH
-          })
-        });
-        
-        const result = await res.json();
-        
-        if (res.ok) {
-          showMsg('✅ 文章已删除，正在部署...', 'success');
-          loadPosts();
-          // 触发部署
-          try {
-            await fetch('https://my-blog-deploy.xianzhi.workers.dev', {
-              method: 'POST',
-              headers: { 'Authorization': 'Bearer my-blog-secret-123' }
-            });
-            showMsg('✅ 已删除！约30秒后生效。', 'success');
-          } catch(e) {
-            showMsg('✅ 已删除，但部署失败，请手动部署。', 'error');
-          }
-        } else {
-          showMsg('❌ 删除失败: ' + (result.message || JSON.stringify(result)), 'error');
-        }
-      } catch (e) {
-        showMsg('❌ 删除失败: ' + e.message, 'error');
-      }
-    }
-
-    function cancelEdit() {
-      document.getElementById('editor').classList.remove('active');
-    }
-
-    function showMsg(text, type) {
-      const el = document.getElementById('msg');
-      el.textContent = text;
-      el.className = 'msg ' + type;
-    }
-
-    // 初始化
-    loadPosts();
-  </script>
+function cancelEdit() { document.getElementById('editor').classList.remove('active'); }
+function showMsg(text, type) { const el = document.getElementById('msg'); el.textContent = text; el.className = 'msg ' + type; }
+</script>
 </body>
 </html>
