@@ -65,6 +65,17 @@
         <input type="text" id="description" placeholder="文章简介（可选）">
       </div>
       <div class="form-group">
+        <label>封面图</label>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <input type="text" id="heroImage" placeholder="图片URL或上传图片">
+          <label class="btn btn-secondary" style="margin:0;cursor:pointer;">
+            📷 上传
+            <input type="file" accept="image/*" onchange="uploadImage(this)" style="display:none;">
+          </label>
+        </div>
+        <div id="imagePreview" style="margin-top:10px;"></div>
+      </div>
+      <div class="form-group">
         <label>标签（逗号分隔）</label>
         <input type="text" id="tags" placeholder="随笔, 技术, 生活">
       </div>
@@ -118,9 +129,61 @@
       document.getElementById('editorTitle').textContent = '新建文章';
       document.getElementById('title').value = '';
       document.getElementById('description').value = '';
+      document.getElementById('heroImage').value = '';
+      document.getElementById('imagePreview').innerHTML = '';
       document.getElementById('tags').value = '';
       document.getElementById('content').value = '';
       document.getElementById('editor').classList.add('active');
+    }
+
+    // 上传图片到 GitHub
+    async function uploadImage(input) {
+      const file = input.files[0];
+      if (!file) return;
+      
+      // 显示预览
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        document.getElementById('imagePreview').innerHTML = `<img src="${e.target.result}" style="max-width:200px;border-radius:8px;">`;
+      };
+      reader.readAsDataURL(file);
+      
+      // 上传到 GitHub
+      const date = new Date().toISOString().split('T')[0];
+      const filename = `src/assets/images/${date}-${file.name}`;
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const encoded = btoa(binary);
+      
+      try {
+        showMsg('上传中...', 'success');
+        const res = await fetch(`${API}/contents/${filename}`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `token ${TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: `上传图片: ${file.name}`,
+            content: encoded,
+            branch: BRANCH
+          })
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          document.getElementById('heroImage').value = `../../assets/images/${date}-${file.name}`;
+          showMsg('✅ 图片上传成功！', 'success');
+        } else {
+          showMsg('❌ 上传失败', 'error');
+        }
+      } catch (e) {
+        showMsg('❌ 上传失败: ' + e.message, 'error');
+      }
     }
 
     // Unicode 安全的 base64 解码
@@ -148,11 +211,18 @@
           const titleMatch = fm.match(/title:\s*["']?(.*?)["']?\s*$/m);
           const descMatch = fm.match(/description:\s*["']?(.*?)["']?\s*$/m);
           const tagsMatch = fm.match(/tags:\s*\[(.*?)\]/);
+          const heroMatch = fm.match(/heroImage:\s*["']?(.*?)["']?\s*$/m);
           
           document.getElementById('title').value = titleMatch ? titleMatch[1] : '';
           document.getElementById('description').value = descMatch ? descMatch[1] : '';
+          document.getElementById('heroImage').value = heroMatch ? heroMatch[1] : '';
           document.getElementById('tags').value = tagsMatch ? tagsMatch[1].replace(/["']/g, '') : '';
           document.getElementById('content').value = body.trim();
+          
+          // 显示图片预览
+          if (heroMatch && heroMatch[1]) {
+            document.getElementById('imagePreview').innerHTML = `<p style="color:#666;font-size:14px;">当前封面图: ${heroMatch[1]}</p>`;
+          }
         } else {
           document.getElementById('content').value = content;
         }
@@ -168,6 +238,7 @@
     async function savePost() {
       const title = document.getElementById('title').value.trim();
       const desc = document.getElementById('description').value.trim();
+      const heroImage = document.getElementById('heroImage').value.trim();
       const tags = document.getElementById('tags').value.trim();
       const content = document.getElementById('content').value;
       
@@ -179,11 +250,13 @@
       
       const tagsArr = tags ? tags.split(',').map(t => `"${t.trim()}"`).join(', ') : '';
       
-      const frontmatter = `---
+      let frontmatter = `---
 title: "${title}"
 description: "${desc}"
-pubDate: "${date}"${tagsArr ? `\ntags: [${tagsArr}]` : ''}
----`;
+pubDate: "${date}"`;
+      if (heroImage) frontmatter += `\nheroImage: "${heroImage}"`;
+      if (tagsArr) frontmatter += `\ntags: [${tagsArr}]`;
+      frontmatter += '\n---';
 
       const fullContent = frontmatter + '\n\n' + content;
       const encoded = btoa(unescape(encodeURIComponent(fullContent)));
