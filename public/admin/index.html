@@ -306,6 +306,7 @@ pubDate: "${date}"`;
       if (!confirm(`确定要删除 "${filename}" 吗？`)) return;
       
       try {
+        showMsg('删除中...', 'success');
         const res = await fetch(`${API}/contents/src/content/blog/${filename}`, {
           method: 'DELETE',
           headers: {
@@ -319,14 +320,26 @@ pubDate: "${date}"`;
           })
         });
         
+        const result = await res.json();
+        
         if (res.ok) {
-          showMsg('删除成功！', 'success');
+          showMsg('✅ 文章已删除，正在部署...', 'success');
           loadPosts();
+          // 触发部署
+          try {
+            await fetch('https://my-blog-deploy.xianzhi.workers.dev', {
+              method: 'POST',
+              headers: { 'Authorization': 'Bearer my-blog-secret-123' }
+            });
+            showMsg('✅ 已删除！约30秒后生效。', 'success');
+          } catch(e) {
+            showMsg('✅ 已删除，但部署失败，请手动部署。', 'error');
+          }
         } else {
-          showMsg('删除失败', 'error');
+          showMsg('❌ 删除失败: ' + (result.message || JSON.stringify(result)), 'error');
         }
       } catch (e) {
-        showMsg('删除失败：' + e.message, 'error');
+        showMsg('❌ 删除失败: ' + e.message, 'error');
       }
     }
 
