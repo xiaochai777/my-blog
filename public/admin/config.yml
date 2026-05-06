@@ -2,7 +2,9 @@ backend:
   name: github
   repo: xiaochai777/my-blog
   branch: main
-  base_url: https://decap-oauth.netlify.app
+  auth_type: pkce
+  base_url: https://my-blog-670.pages.dev
+  app_id: Iv1.b924f29b80a6e7e1
 
 media_folder: "src/assets/images"
 public_folder: "/assets/images"
