@@ -1,0 +1,22 @@
+backend:
+  name: github
+  repo: xiaochai777/my-blog
+  branch: main
+  base_url: https://decap-oauth.netlify.app
+
+media_folder: "src/assets/images"
+public_folder: "/assets/images"
+
+collections:
+  - name: "blog"
+    label: "博客文章"
+    folder: "src/content/blog"
+    create: true
+    slug: "{{year}}-{{month}}-{{day}}-{{slug}}"
+    fields:
+      - { label: "标题", name: "title", widget: "string" }
+      - { label: "描述", name: "description", widget: "string", required: false }
+      - { label: "发布日期", name: "pubDate", widget: "datetime" }
+      - { label: "封面图", name: "heroImage", widget: "image", required: false }
+      - { label: "标签", name: "tags", widget: "list", required: false }
+      - { label: "正文", name: "body", widget: "markdown" }
