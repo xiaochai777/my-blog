@@ -1,11 +1,269 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>博客管理后台</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f5f5; }
+    .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+    h1 { color: #333; margin-bottom: 20px; }
+    .card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .btn { display: inline-block; padding: 10px 24px; background: #e74c3c; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; text-decoration: none; }
+    .btn:hover { background: #c0392b; }
+    .btn-secondary { background: #666; }
+    .btn-secondary:hover { background: #444; }
+    .post-item { padding: 16px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+    .post-item:last-child { border-bottom: none; }
+    .post-title { font-size: 18px; color: #333; }
+    .post-date { color: #999; font-size: 14px; }
+    .post-actions button { margin-left: 10px; padding: 6px 12px; font-size: 14px; }
+    .editor { display: none; }
+    .editor.active { display: block; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; margin-bottom: 6px; color: #555; font-weight: 600; }
+    .form-group input, .form-group textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 16px; }
+    .form-group textarea { min-height: 400px; font-family: monospace; line-height: 1.6; }
+    .toolbar { margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+    .msg { padding: 12px; border-radius: 6px; margin-bottom: 16px; display: none; }
+    .msg.success { background: #d4edda; color: #155724; display: block; }
+    .msg.error { background: #f8d7da; color: #721c24; display: block; }
+    .loading { text-align: center; padding: 40px; color: #999; }
+  </style>
 </head>
 <body>
-  <script src="https://unpkg.com/decap-cms@^3.0.0/dist/decap-cms.js"></script>
+  <div class="container">
+    <h1>📝 博客管理后台</h1>
+    
+    <div id="msg" class="msg"></div>
+    
+    <!-- 文章列表 -->
+    <div id="postList" class="card">
+      <div class="toolbar">
+        <h2>文章列表</h2>
+        <button class="btn" onclick="newPost()">+ 新建文章</button>
+      </div>
+      <div id="posts" class="loading">加载中...</div>
+    </div>
+    
+    <!-- 编辑器 -->
+    <div id="editor" class="card editor">
+      <div class="toolbar">
+        <h2 id="editorTitle">新建文章</h2>
+        <div>
+          <button class="btn" onclick="savePost()">保存并发布</button>
+          <button class="btn btn-secondary" onclick="cancelEdit()">取消</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>标题</label>
+        <input type="text" id="title" placeholder="请输入文章标题">
+      </div>
+      <div class="form-group">
+        <label>描述</label>
+        <input type="text" id="description" placeholder="文章简介（可选）">
+      </div>
+      <div class="form-group">
+        <label>标签（逗号分隔）</label>
+        <input type="text" id="tags" placeholder="随笔, 技术, 生活">
+      </div>
+      <div class="form-group">
+        <label>正文（Markdown 格式）</label>
+        <textarea id="content" placeholder="在这里写文章内容..."></textarea>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const TOKEN = localStorage.getItem('github_token') || prompt('请输入你的 GitHub Personal Access Token:');
+    const REPO = 'xiaochai777/my-blog';
+    const BRANCH = 'main';
+    const API = `https://api.github.com/repos/${REPO}`;
+    
+    let currentFile = null;
+    let posts = [];
+
+    // 加载文章列表
+    async function loadPosts() {
+      try {
+        const res = await fetch(`${API}/contents/src/content/blog?ref=${BRANCH}`, {
+          headers: { 'Authorization': `token ${TOKEN}` }
+        });
+        const files = await res.json();
+        
+        posts = files.filter(f => f.name.endsWith('.md') || f.name.endsWith('.mdx'));
+        
+        const html = posts.length ? posts.map(p => `
+          <div class="post-item">
+            <div>
+              <div class="post-title">${p.name.replace(/\.(md|mdx)$/, '')}</div>
+            </div>
+            <div class="post-actions">
+              <button class="btn btn-secondary" onclick="editPost('${p.name}')">编辑</button>
+              <button class="btn btn-secondary" onclick="deletePost('${p.name}', '${p.sha}')">删除</button>
+            </div>
+          </div>
+        `).join('') : '<p style="padding:20px;color:#999;">还没有文章，点击上面按钮新建一篇吧！</p>';
+        
+        document.getElementById('posts').innerHTML = html;
+      } catch (e) {
+        document.getElementById('posts').innerHTML = '<p style="padding:20px;color:red;">加载失败：' + e.message + '</p>';
+      }
+    }
+
+    // 新建文章
+    function newPost() {
+      currentFile = null;
+      document.getElementById('editorTitle').textContent = '新建文章';
+      document.getElementById('title').value = '';
+      document.getElementById('description').value = '';
+      document.getElementById('tags').value = '';
+      document.getElementById('content').value = '';
+      document.getElementById('editor').classList.add('active');
+    }
+
+    // 编辑文章
+    async function editPost(filename) {
+      try {
+        const res = await fetch(`${API}/contents/src/content/blog/${filename}?ref=${BRANCH}`, {
+          headers: { 'Authorization': `token ${TOKEN}` }
+        });
+        const file = await res.json();
+        
+        currentFile = { name: filename, sha: file.sha };
+        const content = atob(file.content);
+        
+        // 解析 frontmatter
+        const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+        if (match) {
+          const fm = match[1];
+          const body = match[2];
+          
+          const titleMatch = fm.match(/title:\s*["']?(.*?)["']?\s*$/m);
+          const descMatch = fm.match(/description:\s*["']?(.*?)["']?\s*$/m);
+          const tagsMatch = fm.match(/tags:\s*\[(.*?)\]/);
+          
+          document.getElementById('title').value = titleMatch ? titleMatch[1] : '';
+          document.getElementById('description').value = descMatch ? descMatch[1] : '';
+          document.getElementById('tags').value = tagsMatch ? tagsMatch[1].replace(/["']/g, '') : '';
+          document.getElementById('content').value = body.trim();
+        } else {
+          document.getElementById('content').value = content;
+        }
+        
+        document.getElementById('editorTitle').textContent = '编辑文章';
+        document.getElementById('editor').classList.add('active');
+      } catch (e) {
+        showMsg('加载文章失败：' + e.message, 'error');
+      }
+    }
+
+    // 保存文章
+    async function savePost() {
+      const title = document.getElementById('title').value.trim();
+      const desc = document.getElementById('description').value.trim();
+      const tags = document.getElementById('tags').value.trim();
+      const content = document.getElementById('content').value;
+      
+      if (!title) { showMsg('请输入标题', 'error'); return; }
+      
+      const date = new Date().toISOString().split('T')[0];
+      const slug = title.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-').replace(/^-|-$/g, '');
+      const filename = currentFile ? currentFile.name : `${date}-${slug || 'post'}.md`;
+      
+      const tagsArr = tags ? tags.split(',').map(t => `"${t.trim()}"`).join(', ') : '';
+      
+      const frontmatter = `---
+title: "${title}"
+description: "${desc}"
+pubDate: "${date}"${tagsArr ? `\ntags: [${tagsArr}]` : ''}
+---`;
+
+      const fullContent = frontmatter + '\n\n' + content;
+      const encoded = btoa(unescape(encodeURIComponent(fullContent)));
+      
+      try {
+        const body = {
+          message: currentFile ? `更新文章: ${title}` : `新建文章: ${title}`,
+          content: encoded,
+          branch: BRANCH
+        };
+        if (currentFile) body.sha = currentFile.sha;
+        
+        const res = await fetch(`${API}/contents/src/content/blog/${filename}`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `token ${TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(body)
+        });
+        
+        if (res.ok) {
+          showMsg('保存成功！正在触发部署...', 'success');
+          cancelEdit();
+          loadPosts();
+          // 触发 Cloudflare Pages 重新部署
+          try {
+            await fetch('https://my-blog-deploy.xianzhi.workers.dev', {
+              method: 'POST',
+              headers: { 'Authorization': 'Bearer my-blog-secret-123' }
+            });
+            showMsg('✅ 发布成功！约30秒后生效，请稍后刷新博客页面。', 'success');
+          } catch(e) {
+            showMsg('✅ 文章已保存，但自动部署失败。请在 Cloudflare 手动部署。', 'error');
+          }
+        } else {
+          const err = await res.json();
+          showMsg('保存失败：' + err.message, 'error');
+        }
+      } catch (e) {
+        showMsg('保存失败：' + e.message, 'error');
+      }
+    }
+
+    // 删除文章
+    async function deletePost(filename, sha) {
+      if (!confirm(`确定要删除 "${filename}" 吗？`)) return;
+      
+      try {
+        const res = await fetch(`${API}/contents/src/content/blog/${filename}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `token ${TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: `删除文章: ${filename}`,
+            sha: sha,
+            branch: BRANCH
+          })
+        });
+        
+        if (res.ok) {
+          showMsg('删除成功！', 'success');
+          loadPosts();
+        } else {
+          showMsg('删除失败', 'error');
+        }
+      } catch (e) {
+        showMsg('删除失败：' + e.message, 'error');
+      }
+    }
+
+    function cancelEdit() {
+      document.getElementById('editor').classList.remove('active');
+    }
+
+    function showMsg(text, type) {
+      const el = document.getElementById('msg');
+      el.textContent = text;
+      el.className = 'msg ' + type;
+    }
+
+    // 初始化
+    loadPosts();
+  </script>
 </body>
 </html>
